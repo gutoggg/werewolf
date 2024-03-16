@@ -1,0 +1,27 @@
+{
+  "name": "werewolf",
+  "tree": {
+    "$className": "DataModel",
+
+    "ReplicatedStorage": {
+      "src": {
+        "$path": "src/shared"
+      },
+      "packages" : {
+        "$path": "Packages"
+      }
+    },
+
+    "ServerScriptService": {
+      "src": {
+        "$path": "src/server"
+      }
+    },
+
+    "StarterPlayer": {
+      "StarterPlayerScripts": {
+        "$path": "src/client"
+      }
+    }
+  }
+}
