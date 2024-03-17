@@ -7,13 +7,12 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local Knit = require(ReplicatedStorage.packages.knit)
 
 --//Knit Placeholders
-local TeleportService, MapService, SpellService, PlayerService
 
 --//Constants
 local SERVER_SRC = ServerScriptService.src
 
 --//Modules
---local Match = require(SERVER_SRC.classes.Match)
+local Match = require(SERVER_SRC.classes.Match)
 
 --//Service Creation
 local MatchService = Knit.CreateService {
@@ -34,7 +33,7 @@ function MatchService:KnitStart()
 end
 
 function MatchService:StartMatch(players)
-    --self.CurrentMatch = Match.new(players)
+    self.CurrentMatch = Match.new(players)
     self.CurrentMatch:Start()
     print("Match Started!")
     MatchService:SetupMatchEvents()

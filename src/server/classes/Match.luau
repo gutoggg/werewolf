@@ -1,29 +1,28 @@
 --//ROBLOX SERVICES
+local Players = game:GetService("Players")
 local ServerScriptService = game:GetService("ServerScriptService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 --//CONSTANTS
 local PACKAGE_FOLDER = ReplicatedStorage:WaitForChild("packages")
 local SHARED_FOLDER = ReplicatedStorage:WaitForChild("src")
+local METADATA_FOLDER = SHARED_FOLDER:WaitForChild("metadata")
 local SERVER_SRC = ServerScriptService:WaitForChild("src")
 
 --//DEPENDENCIES
 local Maid = require(PACKAGE_FOLDER:WaitForChild("maid"))
 local Signal = require(PACKAGE_FOLDER:WaitForChild("signal"))
-local Caster = require(SERVER_SRC:WaitForChild("classes"):WaitForChild("Caster"))
+local GameConfig = require(METADATA_FOLDER:WaitForChild("GameConfig"))
 
 --//CLASS
 local Match = {}
 Match.__index = Match
 Match._instances = {}
 
-function Match.new(players, _spellService, _teleportService)
+function Match.new(players)
     local self  = setmetatable({}, Match)
 
-    self.SpellService = _spellService
-    self.TeleportService = _teleportService
     self.Players = players
-    self.Casters = {}
     self.Stats = {
         Time = 0
     }
@@ -32,7 +31,7 @@ function Match.new(players, _spellService, _teleportService)
         MatchStarted = Signal.new(),
         MatchEnded = Signal.new(),
         PlayerRemoved = Signal.new(),
-        PlayerDamaged = Signal.new()
+        RoundEnded = Signal.new()
     }
 
     self._maid = Maid.new()
@@ -54,68 +53,85 @@ function Match.new(players, _spellService, _teleportService)
 end
 
 function Match:Start()
+    self:DistributeRoles(#self.Players)
+    self:SetupMatchEvents()
     self.Events.MatchStarted:Fire()
-    for i, player : Player in self.Players do
-        self:SetupPlayer(player)
-    end
-    --self:TurnOnPlayersCasts()
+    self:StartGameLoop()
+    self:End()
 end
 
-function Match:SetupPlayer(player : Player)
-    self.Casters[player] = Caster.new(player)
-    self._maid:GiveTask(self.Casters[player].Events.Damaged:Connect(function(damage)
-        self.Events.PlayerDamaged:Fire(player, damage)
-     end))
-    self:SetupPlayerRemoveEvents(player)
-end
+function Match:DistributeRoles()
+	local roleDistribution = self:SortRolesByPlayerQuantity()
 
-function Match:SetupPlayerRemoveEvents(player : Player)
-    self.Casters[player]._maid:GiveTask(self.Casters[player].Events.Died:Once(function()
-        self:RemovePlayer(player)
-    end))
-
-    self._maid:GiveTask(player.AncestryChanged:Once(function()
-        self:RemovePlayer(player)
-    end))
-
-    self._maid:GiveTask(function()
-        if self.Casters[player] then
-            self.Casters[player]:Destroy()
+    local roleList = {}
+    for role, count in roleDistribution do
+        for i = 1, count do
+            table.insert(roleList, role)
         end
+    end
+
+    for i = #roleList, 2, -1 do
+        local j = math.random(i)
+        roleList[i], roleList[j] = roleList[j], roleList[i]
+    end
+
+    for i, player in self.Players do
+        player:SetAttribute("Role", roleList[i])
+    end
+end
+
+function Match:SetupMatchEvents()
+    local playerRemoveConnection = Players.PlayerRemoving:Once(function(player)
+        self:RemovePlayer(player)
+    end)
+
+    self.Events.MatchEnded:Once(function(winner)
+        playerRemoveConnection:Disconnect()
     end)
 end
 
-function Match:CheckFallingPlayers()
-    for i, j : Player in self.Players do
-        if j.Character then
-            local character = j.Character
-            local rootPart = character:WaitForChild("HumanoidRootPart")
-            if rootPart then
-                local rootPartPosition = rootPart.Position
-                if rootPartPosition.Y <= workspace:WaitForChild("MapAnchor").Position.Y - 25 then
-                    self:RemovePlayer(j)
-                    self.TeleportService:TeleportPlayerListToLobby({j})
-                end
+function Match:StartGameLoop()
+    --GetCurrentRoundType, if doesnt exist create it
+    --Check win conditions for villagers and werewolfs
+    --Exevute round routine
+    --Sent round results
+    --Toggle round type
+    --Repeat
+end
+
+function Match:SortRolesByPlayerQuantity()
+	local playerQuantity = #self.Players
+	local roles = {}
+
+    local minRolesSum = 0
+    local nonWerewolfCount = 0
+    for i, role in GameConfig.Match.AllowedRoles do
+        roles[i] = role.Min
+        minRolesSum += role.Min
+        if i ~= "Werewolf" then
+            nonWerewolfCount += 1
+        end
+    end
+    
+	local remainingPlayers = playerQuantity - minRolesSum
+
+	while remainingPlayers > 0 do
+        if nonWerewolfCount > roles.Werewolf + 1 and roles.Werewolf < GameConfig.Match.AllowedRoles.Werewolf.Max then
+            roles.Werewolf += 1
+            remainingPlayers -= 1
+            continue
+        end
+        
+        for i, role in GameConfig.Match.AllowedRoles do
+            if i ~= "Werewolf" and roles[i] < role.Max then
+                roles[i] += 1
+                nonWerewolfCount += 1
+                remainingPlayers -= 1
             end
         end
     end
-end
 
-function Match:Update(dt)
-    if self.Ended then return end
-    self.Stats.Time += dt
-    local playerCount = self:GetRemainingPlayers()
-    if playerCount <= 1 then
-        if playerCount == 1 then
-            local winner = self.Players[1]
-            self.Winner = winner
-        end
-        self.Ended = true
-        self:End()
-        return 0
-    end
-    self:CheckFallingPlayers()
-    return self.Stats.Time
+	return roles
 end
 
 function Match:End()
@@ -128,10 +144,7 @@ function Match:RemovePlayer(player : Player)
     local playerIndexPosition = self:GetPlayerIndexInMatchPlayerList(player)
     if playerIndexPosition then
         local removedPlayer = table.remove(self.Players, playerIndexPosition)
-        self.Casters[removedPlayer]:Destroy()
-        self.Casters[removedPlayer] = nil
         self.Events.PlayerRemoved:Fire(removedPlayer)
-        self.SpellService.Client.TurnOffCasts:Fire(player)
     else
         error("This player is not in the match list!")
     end

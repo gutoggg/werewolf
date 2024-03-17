@@ -7,7 +7,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local Knit = require(ReplicatedStorage.packages.knit)
 
 --//KNIT PLACEHOLDERS
-local SchedulerService, PlayerService, MatchService, MapService, DataService
+local SchedulerService, PlayerService, MatchService
 
 --//CONSTANTS
 local SERVER_SRC = ServerScriptService.src
@@ -17,7 +17,7 @@ local ENUMS_FOLDER = ReplicatedStorage.src.enums
 
 --//MODULES
 local PlayerStates = require(ENUMS_FOLDER:WaitForChild("PlayerStates"))
-local TimeConfig = require(SHARED_SRC:WaitForChild("metadata"):WaitForChild("TimeConfig"))
+local GameConfig = require(SHARED_SRC:WaitForChild("metadata"):WaitForChild("GameConfig"))
 
 --//SERVICE
 local GameLoopService = Knit.CreateService {
@@ -45,18 +45,22 @@ function GameLoopService:SetGameState(newState)
     local playerState = PlayerStates[newState]
     assert(playerState ~= nil, "Invalid state")
     self.CurrentState = playerState
+    self.Timer = 0
     workspace:SetAttribute("GameState", PlayerStates[newState])
-    workspace:SetAttribute("MaxTimer", TimeConfig[newState])
+    workspace:SetAttribute("MaxTimer", GameConfig.GameStateDuration[newState])
+    workspace:SetAttribute("Timer", self.Timer)
     print("Game state changed to", newState)
 end
 
-function GameLoopService:GetState()
+function GameLoopService:GetGameState()
     return self.CurrentState
 end
 
 function GameLoopService:StartGameLoop()
     self:SetGameState(PlayerStates.Lobby)
-    self.GameConnection = SchedulerService:ConnectToHeartbeat(function(...) self:Update(...) end)
+    self.GameConnection = SchedulerService:ConnectToHeartbeat(function(...) 
+        self:Update(...)
+    end)
 end
 
 function GameLoopService:PauseGameLoop()
@@ -65,38 +69,23 @@ end
 
 function GameLoopService:Update(dt)
     if self.CurrentState == PlayerStates.Lobby then
-        self:UpdateLobby(dt)
-    elseif self.CurrentState == PlayerStates.Game then
-        self:UpdateMatch(dt)
-    end
-end
+        if self.Timer >= GameConfig.GameStateDuration.Lobby then
+            local playersOnLobby = PlayerService:GetPlayersOnLobby()
+            if #playersOnLobby >= GameConfig.Match.MinPlayerQuantity then
+                self:SetGameState(PlayerStates.Game)
+                local match = MatchService:StartMatch(playersOnLobby)
+                match.Events.MatchEnded:Once(function()
+                    self:SetGameState(PlayerStates.Lobby)
+                end)
+            end
 
-function GameLoopService:UpdateLobby(dt)
-    local playersOnLobby = PlayerService:GetPlayersOnLobby()
-
-    if self.Timer >= TimeConfig.Lobby then
-        if #playersOnLobby >= 2 then
-            self:SetGameState(PlayerStates.Game)
-            local match = MatchService:StartMatch(playersOnLobby)
-            match.Events.MatchEnded:Once(function()
-                self:SetGameState(PlayerStates.Lobby)
-            end)
-        else
             self.Timer = 0
+            return
+
         end
-    else
+
         self.Timer += dt
         workspace:SetAttribute("Timer", self.Timer)
-    end
-end
-
-function GameLoopService:UpdateMatch(dt)
-    local match = Knit.GetService("MatchService"):GetCurrentMatch()
-    if match then
-        if not match.Ended then
-            self.Timer = match:Update(dt)
-            workspace:SetAttribute("Timer", self.Timer)
-        end
     end
 end
 
